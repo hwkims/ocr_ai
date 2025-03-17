@@ -1,7 +1,8 @@
 # 🖼️ hwkims/ocr_ai
 
 [![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/hwkims/ocr_ai/main/app.py)  
-**(Replace the above link with your actual Streamlit sharing link)**
+![image](https://github.com/user-attachments/assets/ac2b44b1-43cb-42ca-9c84-a101d965edc4)
+
 
 ## ✨ Introduction
 
