@@ -1,0 +1,109 @@
+import streamlit as st
+import requests
+import base64
+import io
+from PIL import Image
+import re
+import pandas as pd
+import io
+
+# Ollama 서버 주소
+OLLAMA_HOST = 'http://localhost:11434'
+
+def query_ollama_ocr(image_data):
+    """Ollama API 호출 (표 데이터 추출에 최적화된 프롬프트 사용)"""
+    prompt = """
+    You are an expert in document understanding and information extraction.
+    Your task is to analyze the image of a document and extract structured data, especially tables.
+    Identify any tables in the image and extract their content in a clear, well-formatted CSV (Comma Separated Values) format.
+    The first row of the CSV should be the header row, with column names clearly identified.
+    Each subsequent row should represent a row of data from the table.
+    If there are multiple tables in the document, extract each table as a separate CSV string, separated by a "----TABLE_SEPARATOR----" marker.
+    If there are text paragraphs outside of tables, extract them as well, but prioritize table extraction.
+    Respond ONLY with the extracted CSV data or text, without any additional explanations or commentary.
+    """
+    data = {
+        "model": "granite3.2-vision",
+        "prompt": prompt,
+        "stream": False,
+        "images": [image_data],  # base64 문자열
+        "options": {"temperature": 0}
+    }
+    response = requests.post(f"{OLLAMA_HOST}/api/generate", json=data, timeout=120)
+    response.raise_for_status()
+    return response.json()
+
+
+def parse_csv_tables(text):
+    """텍스트에서 CSV 테이블 분리 및 Pandas DataFrame으로 변환"""
+    table_separator = "----TABLE_SEPARATOR----"
+    csv_strings = text.split(table_separator)
+    tables = []
+    for csv_string in csv_strings:
+        csv_string = csv_string.strip()
+        if csv_string:
+            try:
+                # Pandas DataFrame으로 변환
+                df = pd.read_csv(io.StringIO(csv_string))
+                tables.append(df)
+            except Exception as e:
+                print(f"CSV 파싱 오류: {e}")
+                tables.append(csv_string)  # 파싱 실패 시 원본 CSV 문자열 유지
+    return tables
+
+
+def main():
+    st.title("AI 문서 OCR 서비스 (Ollama) - 표 데이터 추출")
+    st.write("JPG 이미지를 업로드하여 문서 내용을 추출합니다. (표 데이터 추출을 지원합니다.)")
+
+    uploaded_file = st.file_uploader("문서 이미지를 업로드하세요 (JPG).", type=["jpg", "jpeg"])
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="업로드된 이미지", use_column_width=True)
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+
+        if st.button("OCR 실행"):
+            with st.spinner("문서 내용 추출 중..."):
+                try:
+                    ollama_response = query_ollama_ocr(img_str)
+                    if "error" in ollama_response:
+                        st.error("Ollama 오류: " + ollama_response["error"])
+                        if "raw_response" in ollama_response:
+                            st.write("Ollama 원시 응답:")
+                            st.text(ollama_response["raw_response"])
+                    else:
+                        extracted_text = ollama_response['response']
+
+                        # CSV 테이블 파싱 및 Pandas DataFrame으로 변환
+                        tables = parse_csv_tables(extracted_text)
+
+                        if tables:
+                            st.subheader("추출된 테이블 데이터")
+                            for i, table in enumerate(tables):
+                                st.write(f"**테이블 {i+1}:**")
+                                if isinstance(table, pd.DataFrame):
+                                    st.dataframe(table)  # DataFrame으로 표시
+                                    # CSV 파일 다운로드
+                                    csv_data = table.to_csv(index=False).encode('utf-8')
+                                    st.download_button(
+                                        label=f"테이블 {i+1} CSV 파일로 다운로드",
+                                        data=csv_data,
+                                        file_name=f"table_{i+1}.csv",
+                                        mime="text/csv",
+                                    )
+
+                                else:
+                                    st.text(table)  # 파싱 실패 시 텍스트로 표시
+                        else:
+                            st.write("추출된 테이블 데이터가 없습니다.")
+
+
+                except requests.exceptions.RequestException as e:
+                    st.error(f"Ollama 서버 연결 오류: {e}")
+                except Exception as e:
+                    st.error(f"오류 발생: {e}")
+
+if __name__ == "__main__":
+    main()
